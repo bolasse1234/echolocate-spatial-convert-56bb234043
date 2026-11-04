@@ -1,0 +1,37 @@
+name: Convert encrypted Apple spatial audio
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  decode:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Fetch encrypted input
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release download input --pattern input.enc --dir work
+      - name: Decode and encrypt results
+        env:
+          ECHO_KEY_B64: ${{ secrets.ECHO_KEY_B64 }}
+        run: |
+          mkdir -p decoded
+          swift crypt.swift open work/input.enc work/input.mov
+          sw_vers > decoded/provenance.txt
+          swift decode.swift work/input.mov decoded/spatial.caf > decoded/decode-log.txt 2>&1
+          afinfo decoded/spatial.caf >> decoded/provenance.txt
+          afconvert -f WAVE -d LEF32@48000 decoded/spatial.caf decoded/spatial.wav
+          afinfo decoded/spatial.wav >> decoded/provenance.txt
+          tar -czf output.tar.gz -C decoded .
+          swift crypt.swift seal output.tar.gz output.enc
+          rm -f work/input.mov output.tar.gz decoded/spatial.caf decoded/spatial.wav
+      - name: Store encrypted results as a release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload input output.enc --clobber
